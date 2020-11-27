@@ -10,6 +10,7 @@ const Cast = {
      * @param {Object} discord librería de discord.js
      * @param {Function} parse_discord_markdown función de parseado de markdown de discord
      * @param {Object} roller librería de tirada de dados
+     * @param {Function} send_character función PUT de actualización de personaje
      */
     initialize(
         message,
@@ -18,12 +19,13 @@ const Cast = {
         spells,
         discord,
         parse_discord_markdown,
-        roller
+        roller,
+        send_character
     ) {
         if (args[1] === "show") {
-            this.showUserSpells(message, spells, character, discord, args);
+            this.showUserSpells(message, spells, character, discord, args, parse_discord_markdown);
         } else if (args[1].includes('"')) {
-            this.castSpell(message, args, args[1].replace(/"/g, ""), spells, character, parse_discord_markdown, roller);
+            this.castSpell(message, args, args[1].replace(/"/g, ""), spells, character, parse_discord_markdown, roller, send_character);
         } else {
             this.sendMessage(message, ":warning: No se ha podido encontrar el parámetro introducido. Para una lista completa de parámetros introduce `!cast help`.")
         }
@@ -36,12 +38,13 @@ const Cast = {
      * @param {Object} character objeto de datos del personaje
      * @param {Object} discord librería discord.js
      * @param {Array} args array de parámetros del usuario
+     * @param {Function} parse_discord_markdown función de parseado de markdown de discord
      */
-    showUserSpells(message, spellList, character, discord, args) {
+    showUserSpells(message, spellList, character, discord, args, parse_discord_markdown) {
         if (character.stats.spells) {
             const embed = new discord.MessageEmbed()
 
-            if (args[2].includes('"')) {
+            if (args[2] && args[2].includes('"')) {
                 const spellIndex = spellList.findIndex(spell => spell.name === args[2].replace(/"/g, ""));
 
                 if (spellIndex > -1) {
@@ -51,19 +54,35 @@ const Cast = {
                         setTitle(selectedSpell.name)
                         .setDescription((selectedSpell.stats.level > 0 ?
                             `Hechizo de ${selectedSpell.stats.school} de nivel ${selectedSpell.stats.level}` :
-                            `Truco de ${selectedSpell.stats.school}`))
-                        .addFields("Componentes", `${selectedSpell.stats.components.type} (${selectedSpell.stats.components.description})`)
-                        .addFields("Tiempo de lanzamiento", selectedSpell.stats.castingTime)
-                        .addFields("Duración", selectedSpell.stats.duration)
+                            `Truco de ${selectedSpell.stats.school}`) + `\n\n${parse_discord_markdown(selectedSpell.stats.description)}`)
+                        .addFields({
+                            name: "Componentes",
+                            value: `${selectedSpell.stats.components.type}` + 
+                            (selectedSpell.stats.components.description ? `(${selectedSpell.stats.components.description})` : '')
+                        })
+                        .addFields({
+                            name: "Tiempo de lanzamiento",
+                            value: selectedSpell.stats.castingTime
+                        })
+                        .addFields({
+                            name: "Duración",
+                            value: selectedSpell.stats.duration
+                        })
 
                     if (selectedSpell.stats.range) {
                         embed
-                            .addFields("Alcance", selectedSpell.stats.range)
+                            .addFields({
+                                name: "Alcance",
+                                value: selectedSpell.stats.range
+                            })
                     }
 
                     if (selectedSpell.stats.attack) {
                         embed
-                            .addFields("Ataque", selectedSpell.stats.attack)
+                            .addFields({
+                                name: "Ataque",
+                                value: selectedSpell.stats.attack
+                            })
                     }
                 }
 
@@ -107,8 +126,9 @@ const Cast = {
      * @param {Object} character objeto de datos del personaje
      * @param {Function} parse_discord_markdown función de parseado de markdown de discord
      * @param {Object} roller librería de tirada de dados
+     * @param {Object} character objeto de datos del personaje
      */
-    castSpell(message, args, spell, spells, character, parse_discord_markdown, roller) {
+    castSpell(message, args, spell, spells, character, parse_discord_markdown, roller, send_character) {
         const spellAttack = (message, args, roller, spell, spellLevel = null) => {
             if (args[3].match(regex.isDice)) {
                 const roll = roller.roll(args[3]);
@@ -158,9 +178,23 @@ const Cast = {
                 str += `: ${roll.output}`;
 
                 this.sendMessage(message, str);
-                
+
             } else {
                 this.sendMessage(message, ":warning: Introduce los dados que quieres lanzar.")
+            }
+        }
+
+        const useSpellSlot = (spellLevel, character, send_character) => {
+            if (character.stats.spellSlots) {
+                const newChar = { ...character };
+                let slots = parseInt(newChar.stats.spellSlots[spellLevel.toString()]);
+
+                if (slots > 0) {
+                    slots--;
+                    newChar.stats.spellSlots[spellLevel.toString()] = slots.toString();
+
+                    send_character(newChar);
+                }
             }
         }
 
@@ -175,12 +209,16 @@ const Cast = {
                     spellHeal(message, args, roller, spell, spellLevel)
                 }
 
+                useSpellSlot(spellLevel, character, send_character);
+
             } else {
                 if (args[2] === "dmg") {
                     spellAttack(message, args, roller, spell);
                 } else if (args[2] === "heal") {
                     spellHeal(message, args, roller, spell)
                 }
+
+                useSpellSlot(spellLevel, character, send_character);
             }
         } else {
             const index = spells.findIndex(sp => sp.name === spell);
@@ -190,9 +228,11 @@ const Cast = {
             const spellStr = `**${character.flavor.traits.name}** lanza el hechizo **${selectedSpell.name}** a nivel **${selectedSpell.stats.level}**`;
             this.sendMessage(message, parse_discord_markdown(spellStr))
 
+            useSpellSlot(selectedSpell.stats.level, character, send_character);
+
         }
     },
-    
+
     /**
      * Envía un mensaje al canal de Discord
      * @param {Object} message objeto de mensaje de Discord

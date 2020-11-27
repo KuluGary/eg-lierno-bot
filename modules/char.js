@@ -166,9 +166,7 @@ const Char = {
                 if (userCharacters.findIndex(userChar => userChar.flavor.traits.name === charName) >= 0) {
                     const selectedChar = userCharacters.filter(userChar => userChar.flavor.traits.name === charName)[0];
 
-                    selectedCharacters = {
-                        [message.author.id]: selectedChar
-                    };
+                    selectedCharacters[message.author.id] = selectedChar;
 
                     this.sendMessage(message, "Se ha seleccionado el personaje: " + selectedCharacters[message.author.id].flavor.traits.name);
                 }

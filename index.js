@@ -1,31 +1,32 @@
 const discord = require('discord.js');
-const configs = require('./configs/configs');
-const regex = require('./utils/utils');
+const io = require('socket.io-client');
 const rpgDiceRoller = require('rpg-dice-roller/lib/umd/bundle.js');
 const axios = require("axios")
 
-const io = require('socket.io-client');
-const socket = io.connect(configs.socket_url, {
-       reconnection: true
-});
+const regex = require('./utils/utils');
+const configs = require('./configs/configs');
 
 const client = new discord.Client();
 const roller = new rpgDiceRoller.DiceRoller();
+
+client.login(configs.discordBotToken)
+
+const socket = io.connect(configs.socket_url, {
+    reconnection: true
+});
 
 const Roll = require("./modules/roll");
 const Attack = require("./modules/attack");
 const Save = require("./modules/save");
 const Char = require('./modules/char');
 const Cast = require('./modules/cast');
-
-client.login(configs.discordBotToken)
+const Rest = require('./modules/rest');
 
 const characters = [];
 const users = [];
 const campaigns = [];
 const spells = [];
 let selectedCharacters = {};
-let character;
 
 /**
  * Una vez el bot de Discord inicializa,
@@ -46,24 +47,24 @@ client.on("ready", () => {
 socket.on('connect', function () {
     console.log(`Socket connected to ${configs.socket_url}`);
 
-    socket.on('updatedCharacter', function(data) {
+    socket.on('updatedCharacter', function (data) {
         console.log(`Updated character ${data.id}`);
-        get_characters();
+        setTimeout(() => get_characters(), 1000);
     })
 
-    socket.on('updatedUsers', function(data) {
+    socket.on('updatedUsers', function (data) {
         console.log(`Updated user ${data.id}`);
-        get_users();
+        setTimeout(() => get_users(), 1000);
     })
 
-    socket.on('updatedCampaigns', function(data) {
+    socket.on('updatedCampaigns', function (data) {
         console.log(`Updated campaign ${data.id}`);
-        get_campaigns();
+        setTimeout(() => get_campaigns(), 1000);
     })
 
-    socket.on('updatedSpells', function(data) {
+    socket.on('updatedSpells', function (data) {
         console.log(`Updated spell ${data.id}`);
-        get_spells();
+        setTimeout(() => get_spells(), 1000);
     })
 })
 
@@ -72,12 +73,14 @@ socket.on('connect', function () {
  */
 client.on("message", async message => {
     if (message.content.charAt(0) === "!") {
-        character = selectedCharacters[message.author.id] || await select_character(message);
-        
+        let character = selectedCharacters[message.author.id] || await select_character(message);
+
         // Transforma el input del usuario en una array de parámetros
-        const args = message.content 
+        const args = message.content
             .replace(regex.removeSpacesAroundOperator, "$1")
             .match(regex.splitParams);
+
+        console.log(args[0])
 
         switch (args[0]) {
             case "!commands":
@@ -121,11 +124,19 @@ client.on("message", async message => {
                     spells,
                     discord,
                     parse_discord_markdown,
-                    roller
+                    roller,
+                    send_character
+                )
+            case "!rest":
+                return Rest.initialize(
+                    message,
+                    args,
+                    character,
+                    send_character
                 )
             default:
                 return message.channel.send(":warning: El comando introducido no ha podido ser reconocido. Utiliza `!commands` para obtener un listado de comandos disponibles.`")
-        }        
+        }
     }
 });
 
@@ -160,6 +171,16 @@ async function get_characters() {
         const chars = await axios.get(url, { headers });
 
         characters.push(...chars.data.payload);
+
+        if (Object.keys(selectedCharacters).length > 0) {
+            const users = Object.keys(selectedCharacters);
+
+            users.forEach(user => {
+                const char = selectedCharacters[user];
+
+                selectedCharacters[user] = characters.filter(ch => ch._id === char._id)[0];
+            })
+        }
     } catch (e) {
         console.log(e);
     }
@@ -285,4 +306,19 @@ function parse_discord_markdown(string) {
         .replace(/<li>/g, "\n● ")
         .replace(/<\/li>/g, "")
         .replace(/<br\/>/g, "\n")
+}
+
+async function send_character(newCharacter) {
+    const token = await user_data();
+
+    try {
+        const url = configs.endpoint_url + "characters/" + newCharacter._id;
+        const headers = {
+            'Authorization': 'Bearer ' + token
+        }
+
+        axios.put(url, newCharacter, { headers });
+    } catch (error) {
+        return null
+    }
 }
